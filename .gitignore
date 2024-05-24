@@ -17,6 +17,9 @@ decaf/
 submission/
 cfg/
 darknet
+darknet.riscv*
+libdarknet.a
+obj/
 .fuse*
 
 # OS Generated #
