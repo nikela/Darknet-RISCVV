@@ -12,6 +12,33 @@
 #include "xnor_layer.h"
 #endif
 
+char *get_algorithm_string(ALGORITHM a)
+{
+    switch(a){
+        case GEMM:
+            return "gemm";
+        case GEMM_OPT:
+            return "gemm_opt";
+        case WINOGRAD:
+            return "winograd";
+        case DIRECT:
+            return "direct";
+        default:
+            break;
+    }
+    return "gemm";
+}
+
+ALGORITHM get_algorithm(char *s)
+{
+    if (strcmp(s, "gemm")==0) return GEMM;
+    if (strcmp(s, "gemm_opt")==0) return GEMM_OPT;
+    if (strcmp(s, "winograd")==0) return WINOGRAD;
+    if (strcmp(s, "direct")==0) return DIRECT;
+    fprintf(stderr, "Couldn't find convolutional algorithm %s, going with GEMM\n", s);
+    return GEMM;
+}
+
 void swap_binary(convolutional_layer *l)
 {
     float *swap = l->weights;
@@ -187,7 +214,7 @@ void cudnn_convolutional_setup(layer *l)
 #endif
 #endif
 
-convolutional_layer make_convolutional_layer(int batch, int h, int w, int c, int n, int groups, int size, int stride, int padding, ACTIVATION activation, int batch_normalize, int binary, int xnor, int adam)
+convolutional_layer make_convolutional_layer(int batch, int h, int w, int c, int n, int groups, int size, int stride, int padding, ACTIVATION activation, ALGORITHM algorithm, int batch_normalize, int binary, int xnor, int adam)
 {
     int i;
     convolutional_layer l = {0};
@@ -346,7 +373,7 @@ convolutional_layer make_convolutional_layer(int batch, int h, int w, int c, int
 #endif
     l.workspace_size = get_workspace_size(l);
     l.activation = activation;
-
+	l.algorithm = algorithm;
     fprintf(stderr, "conv  %5d %2d x%2d /%2d  %4d x%4d x%4d   ->  %4d x%4d x%4d  %5.3f BFLOPs\n", n, size, size, stride, w, h, c, l.out_w, l.out_h, l.out_c, (2.0 * l.n * l.size * l.size * l.c / l.groups * l.out_h * l.out_w) / 1000000000.);
 
     return l;

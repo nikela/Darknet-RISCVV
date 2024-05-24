@@ -55,6 +55,10 @@ typedef enum{
 } ACTIVATION;
 
 typedef enum{
+	GEMM, GEMM_OPT, WINOGRAD, DIRECT
+} ALGORITHM;
+
+typedef enum{
     PNG, BMP, TGA, JPG
 } IMTYPE;
 
@@ -120,6 +124,7 @@ typedef struct layer layer;
 struct layer{
     LAYER_TYPE type;
     ACTIVATION activation;
+    ALGORITHM algorithm;
     COST_TYPE cost_type;
     void (*forward)   (struct layer, struct network);
     void (*backward)  (struct layer, struct network);
