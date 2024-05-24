@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <time.h>
+#include <sys/time.h>
 #include <assert.h>
 #include "network.h"
 #include "image.h"
@@ -187,6 +188,8 @@ network *make_network(int n)
 
 void forward_network(network *netp)
 {
+    struct timeval ts, tf;
+
 #ifdef GPU
     if(netp->gpu_index >= 0){
         forward_network_gpu(netp);   
@@ -196,6 +199,7 @@ void forward_network(network *netp)
     network net = *netp;
     int i;
     for(i = 0; i < net.n; ++i){
+	gettimeofday(&ts, NULL);
         net.index = i;
         layer l = net.layers[i];
         if(l.delta){
@@ -206,6 +210,9 @@ void forward_network(network *netp)
         if(l.truth) {
             net.truth = l.output;
         }
+	gettimeofday(&tf, NULL);
+
+	fprintf(stderr, "Layer %d: Time %.3lf (ms)\n", i, (tf.tv_sec - ts.tv_sec)*1000 + (tf.tv_usec - ts.tv_usec)*1e-3); 
     }
     calc_network_cost(netp);
 }

@@ -4,6 +4,12 @@
 #include "cuda.h"
 #include "math.h"
 
+#if __riscv_vector_version==800
+	#define BCAST(a,b) __builtin_epi_vfmv_v_f_2xf32(a,b)
+#else
+	#define BCAST(a,b) __builtin_epi_vbroadcast_2xf32(a,b);
+#endif
+
 ACTIVATION get_activation(char *s);
 
 char *get_activation_string(ACTIVATION a);

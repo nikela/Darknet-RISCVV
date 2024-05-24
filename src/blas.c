@@ -145,23 +145,7 @@ void l2normalize_cpu(float *x, float *dx, int batch, int filters, int spatial)
     }
 }
 
-/*
-void normalize_cpu(float *x, float *mean, float *variance, int batch, int filters, int spatial)
-{
-    int b, f, i;
-    int tmp1 = filters*spatial;
-    for(b = 0; b < batch; ++b){
-	    int tmp2 = tmp1*b;
-        for(f = 0; f < filters; ++f){
-		int tmp3 = tmp2 + f*spatial;
-            for(i = 0; i < spatial; ++i){
-                int index = tmp3 + i;
-                x[index] = (x[index] - mean[f])/(sqrt(variance[f]) + .000001f);
-            }
-        }
-    }
-}*/
-
+#if RISCV
 /* vectorized normalize CPU*/
 void normalize_cpu(float *x, float *mean, float *variance, int batch, int filters, int spatial)
 {
@@ -176,8 +160,8 @@ void normalize_cpu(float *x, float *mean, float *variance, int batch, int filter
             for(i = 0; i < spatial; ){
                 gvl = __builtin_epi_vsetvl(((long)spatial - (long)i), __epi_e32, __epi_m1);
                __epi_2xf32 x_vec=__builtin_epi_vload_2xf32(&x[tmp3+i],gvl);
-                __epi_2xf32 mean_vec = __builtin_epi_vfmv_v_f_2xf32(mean[f], gvl); //broadcast
-                __epi_2xf32 var_vec = __builtin_epi_vfmv_v_f_2xf32(var, gvl); //broadcast
+                __epi_2xf32 mean_vec = BCAST(mean[f], gvl); //broadcast
+                __epi_2xf32 var_vec = BCAST(var, gvl); //broadcast
                 __epi_2xf32 intermediate1_vec  = __builtin_epi_vfsub_2xf32(x_vec, mean_vec, gvl);
                 x_vec = __builtin_epi_vfdiv_2xf32(intermediate1_vec,var_vec, gvl);
                 __builtin_epi_vstore_2xf32(&x[tmp3+i], x_vec, gvl);
@@ -188,6 +172,27 @@ void normalize_cpu(float *x, float *mean, float *variance, int batch, int filter
         }
     }
 }
+
+#else
+
+
+void normalize_cpu(float *x, float *mean, float *variance, int batch, int filters, int spatial)
+{
+    int b, f, i;
+    int tmp1 = filters*spatial;
+    for(b = 0; b < batch; ++b){
+	    int tmp2 = tmp1*b;
+        for(f = 0; f < filters; ++f){
+		int tmp3 = tmp2 + f*spatial;
+            for(i = 0; i < spatial; ++i){
+                int index = tmp3 + i;
+                x[index] = (x[index] - mean[f])/(sqrt(variance[f]) + .000001f);
+            }
+        }
+    }
+}
+#endif
+
 //auto-vectorized
 void const_cpu(int N, float ALPHA, float *X, int INCX)
 {

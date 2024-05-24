@@ -2,6 +2,12 @@
 #define BLAS_H
 #include "darknet.h"
 
+#if __riscv_vector_version==800
+	#define BCAST(a,b) __builtin_epi_vfmv_v_f_2xf32(a,b)
+#else
+	#define BCAST(a,b) __builtin_epi_vbroadcast_2xf32(a,b);
+#endif
+
 void flatten(float *x, int size, int layers, int batch, int forward);
 void pm(int M, int N, float *A);
 float *random_matrix(int rows, int cols);

@@ -4,6 +4,7 @@
 #include <time.h>
 #include "darknet.h"
 #include "list.h"
+#include <assert.h>
 
 #define TIME(a) \
     do { \

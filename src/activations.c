@@ -106,6 +106,7 @@ float activate(float x, ACTIVATION a)
 }
 */
 
+#if RISCV
 /* vectorized activate array*/
 void activate_array(float *x, const int n, const ACTIVATION a)
 {
@@ -117,13 +118,12 @@ void activate_array(float *x, const int n, const ACTIVATION a)
                for(i = 0; i < n; )
                {
                 gvl = __builtin_epi_vsetvl(((long)n - (long)i), __epi_e32, __epi_m1);
-                __epi_2xf32 XERO = __builtin_epi_vfmv_v_f_2xf32(ALPHA, gvl);
-                __epi_2xf32 BETA = __builtin_epi_vfmv_v_f_2xf32(beta, gvl);
+                __epi_2xf32 XERO = BCAST(ALPHA, gvl);
+                __epi_2xf32 BETA = BCAST(beta, gvl);
                 __epi_2xf32 x_vec = __builtin_epi_vload_2xf32(&x[i+0], gvl);
                 __epi_2xi1 mask = __builtin_epi_vmflt_2xf32(x_vec, XERO, gvl);
                 x_vec =  __builtin_epi_vfmul_2xf32_mask(x_vec, x_vec,BETA, mask,gvl);
                 __builtin_epi_vstore_2xf32(&x[i+0], x_vec,   gvl);
-                //__builtin_epi_vstore_2xf32(&x[i+0], alpha,    gvl);
                 i += gvl;
 
                 }
@@ -142,8 +142,8 @@ void activate_array(float *x, const int n, const ACTIVATION a)
 	        for(i=0;i<n;)
 		{
                 gvl = __builtin_epi_vsetvl(((long)n - (long)i), __epi_e32, __epi_m1);
-                __epi_2xf32 XERO = __builtin_epi_vfmv_v_f_2xf32(ALPHA, gvl);
-                __epi_2xf32 one = __builtin_epi_vfmv_v_f_2xf32(ONE, gvl);
+                __epi_2xf32 XERO = BCAST(ALPHA, gvl);
+                __epi_2xf32 one = BCAST(ONE, gvl);
                 __epi_2xf32 x_vec = __builtin_epi_vload_2xf32(&x[i+0], gvl);
                 __epi_2xi1 mask = __builtin_epi_vmflt_2xf32(x_vec, XERO, gvl);
                 x_vec =  __builtin_epi_vfmul_2xf32_mask(x_vec, x_vec,XERO, mask,gvl);
@@ -159,6 +159,17 @@ void activate_array(float *x, const int n, const ACTIVATION a)
                 break;
       }
 }
+
+#else
+void activate_array(float *x, const int n, const ACTIVATION a) 
+{
+	int i;
+	for(i = 0 ; i < n ; ++i){
+		x[i] = activate(x[i], a);
+	}
+}
+#endif
+
 float gradient(float x, ACTIVATION a)
 {
     switch(a){

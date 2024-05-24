@@ -1,6 +1,12 @@
 #ifndef GEMM_H
 #define GEMM_H
 
+#if __riscv_vector_version==800
+	#define BCAST(a,b) __builtin_epi_vfmv_v_f_2xf32(a,b)
+#else
+	#define BCAST(a,b) __builtin_epi_vbroadcast_2xf32(a,b);
+#endif
+
 void gemm_bin(int M, int N, int K, float ALPHA, 
         char  *A, int lda, 
         float *B, int ldb,
