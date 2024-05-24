@@ -681,27 +681,32 @@ void forward_convolutional_layer(convolutional_layer l, network net)
     int m = l.n / l.groups;
     int k = l.size * l.size * l.c / l.groups;
     int n = l.out_w * l.out_h;
-    for (i = 0; i < l.batch; ++i)
-    {
-        for (j = 0; j < l.groups; ++j)
-        {
-            float *a = l.weights + j * l.nweights / l.groups;
-            float *b = net.workspace;
-            float *c = l.output + (i * l.groups + j) * n * m;
-            float *im = net.input + (i * l.groups + j) * l.c / l.groups * l.h * l.w;
+    if (l.algorithm == GEMM || l.algorithm == GEMM_OPT) {
+    	for (i = 0; i < l.batch; ++i)
+    	{
+        	for (j = 0; j < l.groups; ++j)
+        	{
+            	float *a = l.weights + j * l.nweights / l.groups;
+            	float *b = net.workspace;
+            	float *c = l.output + (i * l.groups + j) * n * m;
+            	float *im = net.input + (i * l.groups + j) * l.c / l.groups * l.h * l.w;
 
-            if (l.size == 1)
-            {
-                b = im;
-            }
-            else
-            {
-                im2col_cpu(im, b, l.c / l.groups, l.h, l.w, l.size, l.stride, l.pad);
-            }
-            gemm(0, 0, m, n, k, 1, a, k, b, n, 1, c, n);
-        }
+            	if (l.size == 1)
+            	{
+                	b = im;
+            	}
+            	else
+            	{
+                	im2col_cpu(im, b, l.c / l.groups, l.h, l.w, l.size, l.stride, l.pad);
+            	}
+				if (l.algorithm == GEMM)
+	            	gemm(0, 0, m, n, k, 1, a, k, b, n, 1, c, n);
+				else 
+	            	gemm_opt(0, 0, m, n, k, 1, a, k, b, n, 1, c, n);
+
+        	}
+    	}
     }
-
     if (l.batch_normalize)
     {
         forward_batchnorm_layer(l, net);

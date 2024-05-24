@@ -1,6 +1,6 @@
 #ifndef CONVOLUTIONAL_LAYER_H
 #define CONVOLUTIONAL_LAYER_H
-
+#include <sys/time.h>
 #include "cuda.h"
 #include "image.h"
 #include "activations.h"
@@ -8,6 +8,11 @@
 #include "network.h"
 
 typedef layer convolutional_layer;
+
+ALGORITHM get_algorithm(char *s);
+
+char *get_algorithm_string(ALGORITHM a);
+
 
 #ifdef GPU
 void forward_convolutional_layer_gpu(convolutional_layer layer, network net);

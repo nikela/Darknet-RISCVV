@@ -76,6 +76,16 @@ void gemm(int TA, int TB, int M, int N, int K, float ALPHA,
     gemm_cpu( TA,  TB,  M, N, K, ALPHA,A,lda, B, ldb,BETA,C,ldc);
 }
 
+void gemm_opt(int TA, int TB, int M, int N, int K, float ALPHA, 
+        float *A, int lda, 
+        float *B, int ldb,
+        float BETA,
+        float *C, int ldc)
+{
+    gemm_opt_cpu( TA,  TB,  M, N, K, ALPHA,A,lda, B, ldb,BETA,C,ldc);
+}
+
+
 #if RISCV
 
 /***********************3. loop interchange with manual vectorization with ALPHA!=1 double buffer ****************/
@@ -3803,6 +3813,66 @@ void gemm_cpu(int TA, int TB, int M, int N, int K, float ALPHA,
     else
         gemm_tt(M, N, K, ALPHA,A,lda, B, ldb,C,ldc);
 }
+
+void gemm_opt_cpu(int TA, int TB, int M, int N, int K, float ALPHA, 
+        float *A, int lda, 
+        float *B, int ldb,
+        float BETA,
+        float *C, int ldc)
+{
+    //printf("cpu: %d %d %d %d %d %f %d %d %f %d\n",TA, TB, M, N, K, ALPHA, lda, ldb, BETA, ldc);
+    int i, j;
+    for(i = 0; i < M; ++i){
+        for(j = 0; j < N; ++j){
+            C[i*ldc + j] *= BETA;
+        }
+    }
+    if(!TA && !TB)
+    {
+#if RISCV
+
+
+	    /*** enable below for the 6-loops packed implementations*/
+	float *transposeB, *transposeA;
+        int blockM = ((16 >M)?M:(16)) ;
+        int blockN  =((512>N)?N:(512));
+        int blockK = ((128>K)?K:(128));
+        transposeB= (float *)malloc(blockM*blockN*blockK*sizeof(float));
+        transposeA= (float *)malloc(blockM*blockN*blockK*sizeof(float));
+
+        if (transposeB == NULL) {
+       	 	fprintf(stderr, "Fatal: failed to allocate bytes.\n");
+        	exit(0);
+        }
+        if(transposeA == NULL) {
+        	fprintf(stderr, "Fatal: failed to allocate  bytes.\n");
+       		exit(0);
+        }
+	//gemm_nn_original(M,N,K,ALPHA,A, lda,B, ldb, C, ldc);	
+	gemm_nn_pack2(M, N, K, ALPHA,A, lda, B, ldb,C, ldc, blockM, blockN, blockK, transposeB, transposeA);
+	if(transposeB != NULL)
+        {
+                free(transposeB);
+                transposeB = NULL;
+        }
+        if(transposeA != NULL)
+        {
+                free(transposeA);
+                transposeA = NULL;
+        }
+#else
+	gemm_nn(M, N, K, ALPHA, A, lda, B, ldb, C, ldc);
+#endif
+	
+    }
+    else if(TA && !TB)
+        gemm_tn(M, N, K, ALPHA,A,lda, B, ldb,C,ldc);
+    else if(!TA && TB)
+        gemm_nt(M, N, K, ALPHA,A,lda, B, ldb,C,ldc);
+    else
+        gemm_tt(M, N, K, ALPHA,A,lda, B, ldb,C,ldc);
+}
+
 
 #ifdef GPU
 
