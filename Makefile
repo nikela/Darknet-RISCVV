@@ -3,7 +3,10 @@ CUDNN=0
 OPENCV=0
 OPENMP=0
 DEBUG=0
-NNPACK=1 
+NNPACK=0
+RISCV=0
+VERSION=0
+LLVM_CONFIG=/export/home4/np106j/llvm-EPI-development-toolchain-cross/bin/llvm-config
 
 ARCH= -gencode arch=compute_30,code=sm_30 \
       -gencode arch=compute_35,code=sm_35 \
@@ -17,43 +20,44 @@ ARCH= -gencode arch=compute_30,code=sm_30 \
 VPATH=./src/:./examples
 SLIB=libdarknet.so
 ALIB=libdarknet.a
-EXEC=darknetgemm
+EXEC=darknet
+ifeq ($(RISCV), 1)
+	EXEC=darknet.riscv1.0
+endif
+ifeq ($(VERSION), 07)
+	EXEC=darknet.riscv0.7
+endif
 OBJDIR=./obj/
 
-#CC=gcc
-#CC=../old-llvm-EPI-0.7-development-toolchain-cross/bin/clang
-CC=../llvm-EPI-development-toolchain-cross-new/bin/clang
-#CC=./llvm-0.7/llvm-EPI-0.7-release-toolchain-cross/bin/clang
-#../llvm-EPI-development-toolchain-cross/bin/clang
-#CPP=g++
-#CPP=../old-llvm-EPI-0.7-development-toolchain-cross/bin/clang
-CPP=../llvm-EPI-development-toolchain-cross-new/bin/clang
-#CPP=./llvm-0.7/llvm-EPI-0.7-release-toolchain-cross/bin/clang
-#../llvm-EPI-development-toolchain-cross/bin/clang
-#NVCC=nvcc 
+CC=gcc
+CPP=g++
+ifeq ($(RISCV), 1)
+LLVM_CONFIG=/export/home4/np106j/llvm-EPI-development-toolchain-cross/bin/llvm-config
+ifeq ($(VERSION), 07)
+LLVM_CONFIG=/export/home4/np106j/llvm-EPI-0.7-development-toolchain-cross/bin/llvm-config
+endif
+CC=$(shell $(LLVM_CONFIG) --bindir)/clang
+CPP=$(shell $(LLVM_CONFIG) --bindir)/clang++
+endif
+NVCC=nvcc 
 AR=ar
 ARFLAGS=rcs
-#OPTS=-Ofast
-LDFLAGS= -lm -pthread 
-COMMON= -Iinclude/ -Isrc/ 
-#CFLAGS=--target=riscv64-redhat-linux -Wno-unused-result -Wno-unknown-pragmas -Wfatal-errors -fPIC -o1 -g  -mepi -v -fopenmp=libomp -fno-vectorize -fno-slp-vectorize -mllvm -no-epi-remove-redundant-vsetvl -I /root/vehave-EPI-0.7-src-seq/include/vehave-user -I /root/llvm_EPI-0.7_riscv64_native/lib
+CFLAGS=-O3 -Wall 
+COMMON=-Iinclude/ -Isrc/
+LIBS=-lm -lpthread
+LDFLAGS=
+OPTS=
+ifeq ($(RISCV), 1)
+OPTS=-DRISCV
+LDFLAGS= $(shell $(LLVM_CONFIG) --ldflags)  
+LIBS=-lm -lpthread
+COMMON= -Iinclude/ -Isrc/ -I$(shell $(LLVM_CONFIG) --includedir)
+CFLAGS= $(shell $(LLVM_CONFIG) --cflags) --target=riscv64-unknown-linux-gnu -march=rv64g -mcmodel=medany -O3 -static   -fsave-optimization-record -DUSE_RISCV_VECTOR -Wall -Wno-unused-result -Wno-unknown-pragmas -Wfatal-errors -fPIC -mepi   -v -fno-vectorize -fno-slp-vectorize  
+endif
 
-#CFLAGS= --target=riscv64-redhat-linux  -Wall -Wno-unused-result -Wno-unknown-pragmas -Wfatal-errors -fPIC -mepi -O2  -v -fno-vectorize -fno-slp-vectorize 
-#CFLAGS= --target=riscv64-redhat-linux -static  -Wall -Wno-unused-result -Wno-unknown-pragmas -Wfatal-errors -fPIC -mepi -O2   -v -fno-vectorize 
-#CFLAGS= --target=riscv64-unknown-linux-gnu   -march=rv64g  -static -Wall -Wno-unused-result -Wno-unknown-pragmas -Wfatal-errors -fPIC -mepi -O3  -v -fno-vectorize -I ../../NNPACK-riscv/include/ -I ../../NNPACK-riscv/deps/pthreadpool/include/  
-#CFLAGS= --target=riscv64-unknown-linux-gnu -march=rv64g -O2   -static -fsave-optimization-record -DUSE_RISCV_VECTOR -Wall -Wno-unused-result -Wno-unknown-pragmas -Wfatal-errors -fPIC -mepi   -v -fno-vectorize -fno-slp-vectorize  -mllvm -no-epi-remove-redundant-vsetvl 
-CFLAGS= --target=riscv64-unknown-linux-gnu -march=rv64g -O3 -static   -fsave-optimization-record -DUSE_RISCV_VECTOR -Wall -Wno-unused-result -Wno-unknown-pragmas -Wfatal-errors -fPIC -mepi   -v -fno-vectorize -fno-slp-vectorize  
-#../NNPACK-riscv/include/ -I ../NNPACK-riscv/deps/pthreadpool/include/  
-#CFLAGS= --target=riscv64-redhat-linux -Wall -Wno-unused-result -Wno-unknown-pragmas -Wfatal-errors -fPIC -mepi -O2  -v  -mllvm -no-epi-remove-redundant-vsetvl -I /root/vehave-src-seq/include/vehave-user -I /root/llvm_riscv64_native/lib
-
-
-#CFLAGS= --target=riscv64-redhat-linux -static -Wall -Wno-unused-result -Wno-unknown-pragmas -Wfatal-errors -fPIC -mepi -O1 -v -mllvm -no-epi-remove-redundant-vsetvl -I/root/vehave-EPI-0.7-src-seq/include/vehave-user -I/root/llvm_EPI-0.7_riscv64_native/lib 
-
-#CFLAGS=--target=riscv64-redhat-linux -fPIC -mepi -O1 -g -v  -fno-vectorize -fno-slp-vectorize -mllvm -no-epi-remove-redundant-vsetvl -I /root/old-vehave-EPI-src-seq/include/vehave-user -I /root/old_llvm_riscv64_native/lib
-
-#CFLAGS=--target=riscv64-redhat-linux -Wno-unused-result -Wno-unknown-pragmas -Wfatal-errors -fPIC -o1 -g -mepi -v -fopenmp=libomp -fno-vectorize -fno-slp-vectorize -mllvm -no-epi-remove-redundant-vsetvl -I /root/vehave-src-seq/include/vehave-user -I /root/llvm_riscv64_native/lib
-
-#CFLAGS+=-fobjc-runtime=clang
+ifeq ($(NNPACK), 1)
+CFLAGS += -DNNPACK
+endif
 ifeq ($(OPENMP), 1) 
 CFLAGS+= -fopenmp
 endif
@@ -64,12 +68,6 @@ endif
 
 CFLAGS+=$(OPTS)
 
-ifeq ($(OPENCV), 1) 
-COMMON+= -DOPENCV
-CFLAGS+= -DOPENCV
-LDFLAGS+= `pkg-config --libs opencv` -lstdc++
-COMMON+= `pkg-config --cflags opencv` 
-endif
 
 ifeq ($(GPU), 1) 
 COMMON+= -DGPU -I/usr/local/cuda/include/
@@ -101,7 +99,9 @@ all: obj backup results  $(ALIB) $(EXEC)
 
 
 $(EXEC): $(EXECOBJ) $(ALIB)
-	$(CC)  $(CFLAGS) $(COMMON) $^ -o $@ $(LDFLAGS) $(ALIB)
+	$(CC)  $(CFLAGS) $(COMMON) $^ -o $@ $(ALIB) $(LDFLAGS) $(LIBS) -v
+
+#	$(CC) $(CFLAGS) $(COMMON) -o $@ $^ $(LDFLAGS) $(ALIB) $(LIBS) -v
 #	$(CC)  $(CFLAGS) $(COMMON) $^ ../NNPACKRISCV/lib.a -o $@ $(LDFLAGS) $(ALIB)
 
 $(ALIB): $(OBJS)
@@ -126,8 +126,11 @@ backup:
 results:
 	mkdir -p results
 
-.PHONY: clean
+.PHONY: clean distclean
 
 clean:
-	rm -rf $(OBJS) $(SLIB) $(ALIB) $(EXEC) $(EXECOBJ) $(OBJDIR)/*
+	rm -rf $(OBJS) $(SLIB) $(ALIB) $(EXEC) $(EXECOBJ)
+distclean:
+	rm -rf $(OBJS) $(SLIB) $(ALIB) $(EXEC) $(EXECOBJ) $(OBJDIR)
+
 
