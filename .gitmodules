@@ -1,0 +1,3 @@
+[submodule "NNPACKRISCV"]
+	path = NNPACKRISCV
+	url = https://github.com/nikela/NNPACKRISCV
