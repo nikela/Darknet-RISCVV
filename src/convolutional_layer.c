@@ -5,6 +5,7 @@
 #include "col2im.h"
 #include "blas.h"
 #include "gemm.h"
+#include "winograd.h"
 #include <stdio.h>
 #include <time.h>
 
@@ -707,6 +708,22 @@ void forward_convolutional_layer(convolutional_layer l, network net)
         	}
     	}
     }
+    else if (l.algorithm == WINOGRAD) {
+        for (i = 0 ; i < l.batch ; ++i) 
+        {
+            for (j = 0 ; j < l.groups ; ++j) 
+            {
+                 float * im = net.input + (i * l.groups + j) * l.c /l.groups * l.h * l.w;
+                 winograd(l.c / l.groups, convolutional_out_height(l) * convolutional_out_width(l), l.h, l.w, l.pad, l.size, l.stride, im, l.weights + j * l.nweights / l.groups, l.output + j * (l.n / l.groups) * (convolutional_out_height(l) * convolutional_out_width(l)));
+            }
+        }
+
+    }
+
+
+
+
+    
     if (l.batch_normalize)
     {
         forward_batchnorm_layer(l, net);
