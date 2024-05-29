@@ -1,5 +1,4 @@
 #include "winograd.h"
-#include "winograd_kernels.h"
 #include "utils.h"
 #include "cuda.h"
 #include <stdlib.h>
@@ -10,6 +9,14 @@
 #define L2 64*1024
 #define L3 1*1024*1024
 #define VECTOR_WIDTH 128
+
+static inline int min(int a, int b) {
+    return a<b?a:b;
+}
+
+static inline int doz(int a, int b) {
+        return a > b ? a - b : 0;
+}
 void winograd(int input_channels, 
               int output_channels,               
               int input_height, 
@@ -66,11 +73,13 @@ void winograd(int input_channels,
 	const int output_channels_block_max = ((cache_elements_l3 / input_channels_block_max) / output_channels_subblock_max) * output_channels_subblock_max;
 
 	const int transform_tile_size = tile_elements * transform_element_size;
-	const int input_transform_size = input_channels < input_channels_block_max ? tiles_count * input_channels * transform_tile_size :  tiles_count * input_channels_block_max * transform_tile_size;
-	const int output_transform_size = tiles_count * output_channels * transform_tile_size;
+	const int input_transform_size = min(input_channels * tiles_count * transform_tile_size, 
+                                            input_channels_block_max * tiles_count * transform_tile_size);	
+    const int output_transform_size = tiles_count * output_channels * transform_tile_size;
 
-	int kernel_transform_size = input_channels < input_channels_block_max ? output_channels * input_channels * transform_tile_size : output_channels * input_channels_block_max * transform_tile_size;
-	//memory_size = input_transform_size + output_transform_size + kernel_transform_size; 
+	int kernel_transform_size = min(input_channels * transform_tile_size * output_channels, 
+                                    input_channels_block_max * transform_tile_size * output_channels);	
+    //memory_size = input_transform_size + output_transform_size + kernel_transform_size; 
 	//memory_block = (float*)malloc(memory_size);
 	// fprintf(stderr, "input_channels = %d", input_channels);
 	//	fprintf(stderr, "I am in 2 before transforms");
@@ -82,8 +91,8 @@ void winograd(int input_channels,
 
 	for (int input_channels_block_start = 0; input_channels_block_start < input_channels; input_channels_block_start += input_channels_block_max)
 	{
-		const int input_channels_block_size = input_channels - input_channels_block_start < input_channels_block_max ? input_channels - input_channels_block_start : input_channels_block_max;
-
+		const int input_channels_block_size = min(input_channels - input_channels_block_start,
+                                                    input_channels_block_max); 
 		kernel_parallelize_2d_tile_2d_intertile(kernel+input_channels_block_start * kernel_size * kernel_size, //kernel
 												kernel_transform,  //kernel_transform
 												tuple_size, //tuple_size
@@ -97,108 +106,49 @@ void winograd(int input_channels,
 												1, //tile_j
 												interchannels //tiles
 												);
+        input_parallelize_2d_tile_2d_intertile(input, //input
+                                               input_transform, //input_transform
+                                               tuple_size, 
+                                               tiles_count, 
+                                               tiles_width_count,   //fxdiv_init_size(tiles_width_count)
+                                               input_channels_block_start, 
+                                               input_channels_block_size, 
+                                               input_width, 
+                                               input_height, 
+                                               pad, 
+                                               tile_size, 
+                                               tile_step, 
+                                               input_channels_block_size, 
+                                               tiles_count, 
+                                               1, 
+                                               tiles_subblock_max, 
+                                               interchannels);
 
-		/*
-		//        NNP_KERNEL_TRANSFORM_START(profile)
-		struct kernel_transform_context kernel_transform_context = {
-		    .transform_function = kernel_transform_function,
-		    .kernel = kernel + input_channels_block_start * kernel_size.height * kernel_size.width,
-		    .kernel_transform = kernel_transform,
-		    .tuple_size = tuple_size,
-		    .input_channels = input_channels,
-		    .input_channels_block_size = input_channels_block_size,
-		    .output_channels = output_channels,
-		    .kernel_size = kernel_size,
-		};
-		struct timeval starttime2, endtime2;
-		//	fprintf(stderr, "I am in 2 before kernel transforms");
-		// gettimeofday(&starttime2,NULL);
-		kernel_parallelize_2d_tile_2d_intertile( // threadpool,
-							 //         (pthreadpool_task_2d_tile_2d_t1) compute_kernel_transform,
-		    &kernel_transform_context,
-		    output_channels, input_channels_block_size,
-		    output_channels_subblock_max, 1, nnp_hwinfo.globalinterchannels,
-		    PTHREADPOOL_FLAG_DISABLE_DENORMALS);
-		//       NNP_KERNEL_TRANSFORM_END(profile)
-		gettimeofday(&endtime2, NULL);
-		double totaltime = ((endtime2.tv_sec + .000001 * endtime2.tv_usec) - (starttime2.tv_sec + .000001 * starttime2.tv_usec));
-		// new changes for kernel reuse
-		//      kernel = kernel_transform;
-		//				printf("\n after kernel transformation\n");
-		//				for(int i=0;i<10;i++)
-		//					printf("kernel transformation = %f", *(((float *)kernel_transform)+i));
-		//  NNP_INPUT_TRANSFORM_START(profile);
-		//	fprintf(stderr, "I am in 2 after kernel transforms");
-		struct input_transform_context input_transform_context = {
-		    .input = input,
-		    .input_transform = input_transform,
-		    .transform_function = input_transform_function,
-		    .tuple_size = tuple_size,
-		    .tiles_count = tiles_count,
-		    .tiles_width_count = fxdiv_init_size_t(tiles_width_count),
-		    .input_channels_block_start = input_channels_block_start,
-		    .input_channels_block_size = input_channels_block_size,
-		    .input_size = input_size,
-		    .pad_left = input_padding.left,
-		    .pad_top = input_padding.top,
-		    .input_tile = tile_size,
-		    .input_tile_step = tile_step,
-		};
-		//                              pthreadpool_parallelize_2d_tile_2d(threadpool,
-		//                                      (pthreadpool_task_2d_tile_2d_t) compute_input_transform,
-		//                                      &input_transform_context,
-		//                                      input_channels_block_size, tiles_count,
-		//                                      1,                         tiles_subblock_max,
-		//                                      PTHREADPOOL_FLAG_DISABLE_DENORMALS);
-		// fprintf(stderr, "I am in before input transforms");
-
-		input_parallelize_2d_tile_2d_intertile( // threadpool,  //need o uncomet
-		    &input_transform_context,
-		    input_channels_block_size, tiles_count, 1, tiles_subblock_max, nnp_hwinfo.globalinterchannels,
-		    PTHREADPOOL_FLAG_DISABLE_DENORMALS);
-
-		for (int tuple_index = 0; tuple_index < tuple_count; tuple_index += 1)
-		{
-			nnp_full_tuple_gemm_function full_gemm_function;
-			nnp_fast_tuple_gemm_function fast_gemm_function;
-			fast_gemm_function = nnp_hwinfo.sxgemm.only_mr_x_nr;
-			full_gemm_function = nnp_hwinfo.sxgemm.upto_mr_x_nr;
-			for (int output_channels_block_start = 0; output_channels_block_start < output_channels; output_channels_block_start += output_channels_block_max)
-			{
-				const int output_channels_block_size = min(output_channels - output_channels_block_start, output_channels_block_max);
-				struct tuple_multiplication_context tuple_multiplication_context = {
-				    .tuple_elements = tuple_elements,
-				    .tuple_size = tuple_size,
-				    .tiles_subblock_max = tiles_subblock_max,
-				    .input_channels_block_start = input_channels_block_start,
-				    .input_channels_block_size = input_channels_block_size,
-				    .output_channels = output_channels,
-				    .output_channels_subblock_max = output_channels_subblock_max,
-				    .output_channels_block_start = output_channels_block_start,
-				    .input_transform = input_transform +
-						       tuple_index * tiles_count * input_channels_block_size * tuple_size,
-				    .kernel_transform = kernel_transform +
-							tuple_index * output_channels * input_channels_block_size * tuple_size,
-				    .output_transform = output_transform +
-							tuple_index * tiles_count * output_channels * tuple_size,
-				    .fast_gemm = fast_gemm_function,
-				    .full_gemm = full_gemm_function,
-				};
-				tuple_parallelize_2d_tile_2d( // threadpool,  //tuple multiplication - fast gemm function
-				    //           (pthreadpool_task_2d_tile_2d_t) compute_tuple_multiplication,
-				    &tuple_multiplication_context,
-				    tiles_count, output_channels_block_size,
-				    tiles_block_max, output_channels_subblock_max,
-				    PTHREADPOOL_FLAG_DISABLE_DENORMALS);
-				//				printf("\n after output transformationbefore output\n");
-				//				for(int i=0;i<10;i++)
-				//					printf("output transformation = %f %f %f \t ", *(((float *)tuple_multiplication_context.output_transform)+i), *(((float *)tuple_multiplication_context.input_transform)+i), *(((float *)tuple_multiplication_context.kernel_transform)+i));
-				//		fprintf(stderr,"after tuple");
-			}
-		}
-		//        NNP_BLOCK_MULTIPLICATION_END(profile)
-    */
+        for (int tuple_index = 0 ; tuple_index < tuple_count ; tuple_index += 1) {
+            for (int output_channels_block_start = 0 ; output_channels_block_start < output_channels ; output_channels_block_start += output_channels_block_max) {
+                int output_channels_block_size = min(output_channels - output_channels_block_start,
+                                                 output_channels_block_max);
+                tuple_parallelize_2d_tile_2d(tuple_elements, 
+                                             tuple_size, 
+                                             tiles_subblock_max, 
+                                             input_channels_block_start,
+                                             input_channels_block_size, 
+                                             output_channels, 
+                                             output_channels_subblock_max,
+                                             output_channels_block_start, 
+                                             input_transform, kernel_transform, 
+                                             output_transform, 
+                                             tiles_count,
+                                             output_channels_block_size, 
+                                             tiles_block_max, 
+                                             output_channels_subblock_max);
+            }
+        }
 	}
+
+    output_parallelize_2d_tile_2d(output, output_transform, tuple_size, tiles_count, tiles_width_count, tiles_block_max,
+        output_channels, output_width, output_height, output_tile_size, output_channels, tiles_count,
+        output_channels_subblock_max, tiles_subblock_max, interchannels);
     /*
 	//  NNP_OUTPUT_TRANSFORM_START(profile)
 	struct output_transform_context output_transform_context = {
@@ -208,8 +158,8 @@ void winograd(int input_channels,
 	    .bias = bias,
 	    .tuple_size = tuple_size,
 	    .tiles_count = tiles_count,
-	    .tiles_width_count = fxdiv_init_size_t(tiles_width_count),
-	    .tiles_block_max = fxdiv_init_size_t(tiles_block_max),
+	    .tiles_width_count = fxdiv_init_int(tiles_width_count),
+	    .tiles_block_max = fxdiv_init_int(tiles_block_max),
 	    .output_channels = output_channels,
 	    .output_size = output_size,
 	    .output_tile = output_tile_size,
@@ -255,8 +205,8 @@ struct NNP_CACHE_ALIGN output_transform_context
 
         int tuple_size;
         int tiles_count;
-        struct fxdiv_divisor_size_t tiles_x_count;
-        struct fxdiv_divisor_size_t tiles_block_max;
+        struct fxdiv_divisor_int tiles_width_count;
+        struct fxdiv_divisor_int tiles_block_max;
         int output_channels;
         struct nnp_size output_size;
         struct nnp_size output_tile;
@@ -289,12 +239,12 @@ struct NNP_CACHE_ALIGN input_transform_context
 
         const int tuple_size;
         const int tiles_count;
-        const struct fxdiv_divisor_int tiles_x_count;
+        const struct fxdiv_divisor_int tiles_width_count;
         const int input_channels_block_start;
         const int input_channels_block_size;
         const struct nnp_size input_size;
-        const int pad_left;
-        const int pad_top;
+        const int pad;
+        const int pad;
         const struct nnp_size input_tile;
         const struct nnp_size input_tile_step;
 };
@@ -3884,23 +3834,98 @@ void nnp_owt8x8_3x3s2_with_bias_with_relu__neon(
 {
 }
 
+*/
 ////////////////////////////////////////////////////////////////////////// convolutional file
+static void compute_tuple_multiplication(
+    int tuple_elements, 
+    int tuple_size, 
+    int tiles_subblock_max,
+    int input_channels_block_start, 
+    int input_channels_block_size, 
+    int output_channels,
+    int output_channels_subblock_max, 
+    int output_channels_block_start, 
+    void * _input_transform, 
+    void * _kernel_transform,
+    void * _output_transform,    
+    int tiles_block_start, 
+    int output_channels_subblock_start,
+    int tiles_block_size, 
+    int output_channels_subblock_size)
+{
+
+
+        const void *input_transform = _input_transform +
+                                      tiles_block_start * input_channels_block_size * tuple_size;
+        const void *kernel_transform = _kernel_transform +
+                                       (output_channels_block_start + output_channels_subblock_start) * input_channels_block_size * tuple_size;
+        void *output_transform = _output_transform +
+                                 (tiles_block_start * output_channels + (output_channels_block_start + output_channels_subblock_start) * tiles_block_size) * tuple_size;
+
+        //      printf("tuple elements = %d, output_channels_subblock_size=%d output_channels_subblock_max=%d input_channels_block_size=%d\n", tuple_elements, output_channels_subblock_size, output_channels_subblock_max, input_channels_block_size);
+        if (output_channels_subblock_size == output_channels_subblock_max)
+        {
+                while (tiles_block_size >= tiles_subblock_max)
+                {
+                        tiles_block_size -= tiles_subblock_max;
+                        // printf("fast gemm\n");
+                        nnp_sgemm_only_3x3__scalar(
+                            input_channels_block_size, input_channels_block_start,
+                            input_transform, kernel_transform, output_transform,
+                            output_channels_subblock_size * tuple_elements);
+
+                        input_transform += tiles_subblock_max * input_channels_block_size * tuple_size;
+                        output_transform += tiles_subblock_max * output_channels_subblock_size * tuple_size;
+                }
+        }
+        //		printf("intermediate %f\n", *(((float *)output_transform)+3) );
+
+        while (tiles_block_size != 0)
+        {
+                const int tiles_subblock_size = min(tiles_block_size, tiles_subblock_max);
+                tiles_block_size -= tiles_subblock_size;
+
+                //      printf("full gemm\n");
+                nnp_sgemm_upto_3x3__scalar(
+                    tiles_subblock_size, output_channels_subblock_size,
+                    input_channels_block_size, input_channels_block_start,
+                    input_transform, kernel_transform, output_transform,
+                    output_channels_subblock_size * tuple_elements);
+
+                input_transform += tiles_subblock_max * input_channels_block_size * tuple_size;
+                output_transform += tiles_subblock_max * output_channels_subblock_size * tuple_size;
+        } // sonia - need to uncomment uncomment
+        //		printf("intermediate %f\n", *(((float *)output_transform)+3) );
+}
+
+
 void tuple_parallelize_2d_tile_2d(
-    // pthreadpool_t threadpool,
-    //  pthreadpool_task_2d_tile_2d_t task,
-    void *argument,
+    int tuple_elements, 
+    int tuple_size, 
+    int tiles_subblock_max, 
+    int input_channels_block_start, 
+    int input_channels_block_size, 
+    int output_channels, 
+    int output_channels_subblock_max, 
+    int output_channels_block_start, 
+    void * input_transform, 
+    void * kernel_transform, 
+    void * output_transform,
     int range_i,
     int range_j,
     int tile_i,
-    int tile_j,
-    int flags)
+    int tile_j
+)
 {
         //       printf("I am going in correct no-intertile logic with range_i = %d\n", range_i);
         for (int i = 0; i < range_i; i += tile_i)
         {
                 for (int j = 0; j < range_j; j += tile_j)
                 {
-                        compute_tuple_multiplication(argument, i, j, min(range_i - i, tile_i), min(range_j - j, tile_j));
+                        compute_tuple_multiplication(tuple_elements, tuple_size, tiles_subblock_max,
+                            input_channels_block_start, input_channels_block_size, output_channels,
+                            output_channels_subblock_max, output_channels_block_start, input_transform, kernel_transform,
+                            output_transform, i, j, min(range_i - i, tile_i), min(range_j - j, tile_j));
                 }
         }
 }
@@ -3908,26 +3933,34 @@ void tuple_parallelize_2d_tile_2d(
 
 /////////////////////////////
 void output_parallelize_2d_tile_2d(
-    // pthreadpool_t threadpool,
-    // pthreadpool_task_2d_tile_2d_t task,
-    void *argument,
-    int range_i,
-    int range_j,
-    int tile_i,
+    float * output, 
+    void * output_transform, 
+    int tuple_size, 
+    int tiles_count, 
+    int tiles_width_count, 
+    int tiles_block_max,
+    int output_channels, 
+    int output_width, 
+    int output_height, 
+    int output_tile_size, 
+    int range_i, 
+    int range_j, 
+    int tile_i, 
     int tile_j,
-    int flags)
+    int tiles
+)
 {
         //           printf("I am going in correct no-intertile logic with range_i = %d %d %d %d\n\n", range_i, range_j, tile_i, tile_j);
         // No thread pool used: execute task sequentially on the calling thread 
-        for (int i = 0; i < range_i; i += tile_i)
-        {
-                for (int j = 0; j < range_j; j += tile_j)
-                {
-                        compute_output_transform(argument, i, j, min(range_i - i, tile_i), min(range_j - j, tile_j));
+        for (int i = 0; i < range_i; i += tile_i) {
+                for (int j = 0; j < range_j; j += tile_j) {
+                        compute_output_transform(output, output_transform, tuple_size, tiles_count, tiles_width_count,
+                        tiles_block_max, output_channels, output_width, output_height, output_tile_size, i, j,
+                        min(range_i - i, tile_i), min(range_j - j, tile_j), tiles);
                 }
         }
 }
-*/
+
 /////////////////
 ///
 static void compute_kernel_transform(
@@ -3994,7 +4027,7 @@ void kernel_parallelize_2d_tile_2d_intertile(
         // fprintf(stderr, "I am in kernel function with range_i = %d tiles = %d\n", range_i, tiles);
         // printf("range_i = %d, range j = %d\n", range_i, range_j);
         //        int interchannels =tiles;//16 ;  // for 1024-bit
-        int interchannels = range_j >= tiles ? tiles : range_j;; // 16 ;  // for 1024-bit
+        int interchannels = min(range_j, tiles); // 16 ;  // for 1024-bit
 
         //	fprintf(stderr, "I am after my logic kernel function with range_i = %d interchannels = %d\n", range_i, interchannels);
 
@@ -4002,22 +4035,18 @@ void kernel_parallelize_2d_tile_2d_intertile(
         if ((range_i >= 4) && (range_j >= 4))
         {
                 // fprintf(stderr, "I am going in correct logic with range_i in intertile= %d\n", range_i);
-                if (tile_i == 1)                
-                        tile_i = interchannels;                
-                else if (tile_j == 1)
-                        tile_j = interchannels;
-                /* No thread pool used: execute task sequentially on the calling thread */
-                for (int i = 0; i < range_i; i += tile_i)
-                { // need to load 8x8 tiles from 4 channels at a time
-                        for (int j = 0; j < range_j; j += tile_j)
-                        {
-				int i_end = range_i -i < tile_i ? range_i -i : tile_i;
-				int j_end = range_j -j < tile_j ? range_j -j : tile_j;
-
-                                //              printf(" tile i = %d tile j = %d, min(range_i - i, tile_i) = %d min(range_j - j, tile_j) = %d\n", tile_i, tile_j, min(range_i - i, tile_i),  min(range_j - j, tile_j));
-                                compute_kernel_transform(kernel, kernel_transform, tuple_size, input_channels, input_channels_block_size, output_channels, kernel_size, i, j, i_end, j_end, interchannels);
-                        }
+            if (tile_i == 1)                
+                    tile_i = interchannels;                
+            else if (tile_j == 1)
+                    tile_j = interchannels;
+            /* No thread pool used: execute task sequentially on the calling thread */
+            for (int i = 0; i < range_i; i += tile_i)
+            { // need to load 8x8 tiles from 4 channels at a time
+                for (int j = 0; j < range_j; j += tile_j)
+                {
+                    //              printf(" tile i = %d tile j = %d, min(range_i - i, tile_i) = %d min(range_j - j, tile_j) = %d\n", tile_i, tile_j, min(range_i - i, tile_i),  min(range_j - j, tile_j));
                 }
+            }
 
         } // added by sonia - end
         else
@@ -4028,124 +4057,79 @@ void kernel_parallelize_2d_tile_2d_intertile(
                 {
                         for (int j = 0; j < range_j; j += tile_j)
                         {
-				int i_end = range_i -i < tile_i ? range_i -i : tile_i;
-				int j_end = range_j -j < tile_j ? range_j -j : tile_j;
-                                compute_kernel_transform(kernel, kernel_transform, tuple_size, input_channels, input_channels_block_size, output_channels, kernel_size, i, j, i_end, j_end, interchannels);
+                           compute_kernel_transform(kernel, kernel_transform, tuple_size, input_channels,
+                                input_channels_block_size, output_channels, kernel_size, i, j, min(range_i - i, tile_i),
+                                min(range_j -j, tile_j), interchannels);
                         }
                 }
         }
 }
-
-
-///////////////////////////////
-/*
-void input_parallelize_2d_tile_2d_intertile(
-    //   pthreadpool_t threadpool,
-    void *argument,
-    int range_i,
-    int range_j,
-    int tile_i,
-    int tile_j, int tiles,
-    int flags)
-{
-
-        //	fprintf(stderr, "I am in input pthread function");
-        //       printf("range_i = %d, range j = %d\n", range_i, range_j);
-        int threads_count;
-        int interchannels; // 16 ;  // for 1024-bit
-        if (range_i >= tiles)
-        {
-                interchannels = tiles; // 16 ;  // for 1024-bit
-        }
-        else
-        {
-                interchannels = range_i;
-        }
-
-        if ((range_i >= 4) && (range_j >= 4))
-        {
-                // fprintf(stderr, "I am going in correct logic with range_i in intertile= %d\n", range_i);
-                if (tile_i == 1)
-                {
-                        tile_i = interchannels;
-                }
-                else if (tile_j == 1)
-                {
-                        tile_j = interchannels;
-                }
-                // No thread pool used: execute task sequentially on the calling thread 
-                for (int i = 0; i < range_i; i += tile_i)
-                { // need to load 8x8 tiles from 4 channels at a time
-                        for (int j = 0; j < range_j; j += tile_j)
-                        {
-                                //              printf(" tile i = %d tile j = %d, min(range_i - i, tile_i) = %d min(range_j - j, tile_j) = %d\n", tile_i, tile_j, min(range_i - i, tile_i),  min(range_j - j, tile_j));
-                                compute_input_transform(argument, i, j, min(range_i - i, tile_i), min(range_j - j, tile_j), interchannels);
-                        }
-                }
-        } // added by sonia - end
-        else
-        {
-                // fprintf(stderr, "I am going in correct else if logic with range_i = %d", range_i);
-                // No thread pool used: execute task sequentially on the calling thread 
-                for (int i = 0; i < range_i; i += tile_i)
-                {
-                        for (int j = 0; j < range_j; j += tile_j)
-                        {
-                                compute_input_transform(argument, i, j, min(range_i - i, tile_i), min(range_j - j, tile_j), interchannels);
-                        }
-                }
-        }
-}
-//////////////////////////////
 
 
 static void compute_input_transform(
-    const struct input_transform_context context[restrict static 1],
-    int input_channels_block_offset, int tiles_subblock_start,
-    int input_channels_block_range, int tiles_subblock_size, int interchannels)
+    float * _input, 
+    void * input_transform, 
+    int tuple_size, 
+    int tiles_count, 
+    int tiles_width_count, 
+    int input_channels_block_start, 
+    int input_channels_block_size, 
+    int input_width, 
+    int input_height, 
+    int pad, 
+    int tile_size, 
+    int tile_step, 
+    int input_channels_block_offset, 
+    int tiles_subblock_start, 
+    int input_channels_block_range, 
+    int tiles_subblock_size, 
+    int interchannels) 
 
 {
         // fprintf(stderr, "I am in input");
+        /*
         const int tuple_size = context->tuple_size;
         const int tiles_count = context->tiles_count;
-        const struct fxdiv_divisor_int tiles_x_count = context->tiles_x_count;
+        const struct fxdiv_divisor_int tiles_width_count = context->tiles_x_count;
         const int input_channels_block_start = context->input_channels_block_start;
         const int input_channels_block_size = context->input_channels_block_size;
         const struct nnp_size input_size = context->input_size;
-        const int pad_left = context->input_padding_left;
-        const int pad_top = context->input_padding_top;
+        const int pad = context->input_padding_left;
+        const int pad = context->input_padding_top;
         const struct nnp_size input_tile = context->input_tile;
         const struct nnp_size input_tile_step = context->input_tile_step;
-
-        const float(*input)[input_size.height][input_size.width] =
-            (const float(*)[input_size.height][input_size.width])context->input;
-        void *input_transform = context->input_transform;
-        nnp_transform_2d_with_offset transform_function = context->transform_function;
+        */
+        const float(*input)[input_height][input_width] = 
+            (const float(*)[input_height][input_width])_input;
 
         const int input_channel = input_channels_block_start + input_channels_block_offset;
         for (int tiles_subblock_offset = 0; tiles_subblock_offset < tiles_subblock_size; tiles_subblock_offset += 1)
         {
                 const int tile = tiles_subblock_start + tiles_subblock_offset;
-                const struct fxdiv_result_int tile_xy = fxdiv_divide_size_t(tile, tiles_x_count);
+                int tile_x = tile % tiles_width_count;
+                int tile_y = tile / tiles_width_count;
+                /*
+                const struct fxdiv_result_int tile_xy = fxdiv_divide_int(tile, tiles_width_count);
                 const int tile_x = tile_xy.remainder;
                 const int tile_y = tile_xy.quotient;
+                */ 
 
-                const int output_x = tile_x * input_tile_step.width;
-                const int output_y = tile_y * input_tile_step.height;
+                const int output_x = tile_x * tile_step;
+                const int output_y = tile_y * tile_step;
 
-                const int input_x = min(doz(output_x, pad_left), input_size.width);
-                const int input_y = min(doz(output_y, pad_top), input_size.height);
+                const int input_x = min(doz(output_x, pad), input_width);
+                const int input_y = min(doz(output_y, pad), input_height);
 
-                const int row_offset = doz(pad_top, output_y);
-                const int row_count = min(input_size.height - input_y, input_tile.height - row_offset);
-                const int column_offset = doz(pad_left, output_x);
-                const int column_count = min(input_size.width - input_x, input_tile.width - column_offset);
+                const int row_offset = doz(pad, output_y);
+                const int row_count = min(input_height - input_y, tile_size - row_offset);
+                const int column_offset = doz(pad, output_x);
+                const int column_count = min(input_width - input_x, tile_size - column_offset);
                 if (input_channels_block_size <= 3)
                 {
-                        nnp_iwt8x8_3x3_with_offset__neon(
+                        nnp_iwt8x8_3x3_with_offset__scalar(
                             &input[input_channel][input_y][input_x],
                             input_transform + (tiles_subblock_start * input_channels_block_size + input_channels_block_offset * tiles_subblock_size + tiles_subblock_offset) * tuple_size,
-                            input_size.width,
+                            input_width,
                             input_channels_block_size * tiles_count * tuple_size,
                             row_count, column_count, row_offset, column_offset);
                 }
@@ -4159,54 +4143,88 @@ static void compute_input_transform(
                                 input_ptr[k] = &input[input_channel + k][input_y][input_x];
                                 transform_ptr[k] = input_transform + (tiles_subblock_start * input_channels_block_size + (input_channels_block_offset + k) * tiles_subblock_size + tiles_subblock_offset) * tuple_size;
                         }
-                        nnp_iwt8x8_3x3_with_offset__neon_intertile1(
+                        nnp_iwt8x8_3x3_with_offset__scalar( //intertile1
                             input_ptr,
                             transform_ptr,
-                            input_size.width,
+                            input_width,
                             input_channels_block_size * tiles_count * (tuple_size),
-                            row_count, column_count, row_offset, column_offset, interchannels);
+                            row_count, column_count, row_offset, column_offset); //, interchannels);
                         // fprintf(stderr, "coming out\n");
                 }
         }
 }
 
-static void compute_output_transform(
-    const struct output_transform_context context[restrict static 1],
-    int output_channels_subblock_start, int tiles_subblock_start,
-    int output_channels_subblock_size, int tiles_subblock_size)
-{
-        int interchannels;
-        if (output_channels_subblock_size >= nnp_hwinfo.globalinterchannels)
-        {
-                interchannels = nnp_hwinfo.globalinterchannels;
-        }
-        else
-        {
-                interchannels = output_channels_subblock_size;
-        }
-        //	fprintf(stderr, "value of interchannels in output = %d", interchannels);
-        const int tuple_size = context->tuple_size;
-        const int tiles_count = context->tiles_count;
-        const struct fxdiv_divisor_int tiles_x_count = context->tiles_x_count;
-        const struct fxdiv_divisor_int tiles_block_max = context->tiles_block_max;
-        const int output_channels = context->output_channels;
-        const struct nnp_size output_size = context->output_size;
-        const struct nnp_size output_tile = context->output_tile;
 
-        const int tiles_block_start = fxdiv_round_down_int(tiles_subblock_start, tiles_block_max);
+void input_parallelize_2d_tile_2d_intertile(
+    float * input, 
+    void * input_transform,
+    int tuple_size,
+    int tiles_count, 
+    int tiles_width_count, 
+    int input_channels_block_start,
+    int input_channels_block_size, 
+    int input_width, 
+    int input_height, 
+    int pad, 
+    int tile_size, 
+    int tile_step,
+    int range_i, 
+    int range_j, 
+    int tile_i, 
+    int tile_j, 
+    int tiles)
+{
+    int interchannels = min(tiles, range_i);
+
+    if ((range_i >= 4) && (range_j >=4)) {
+        if (tile_i == 1)
+            tile_i = interchannels;
+        else if (tile_j == 1)
+            tile_j = interchannels;
+    }
+    // No thread pool used: execute task sequentially on the calling thread 
+    for (int i = 0; i < range_i; i += tile_i) { // need to load 8x8 tiles from 4 channels at a time
+        for (int j = 0; j < range_j; j += tile_j) {
+            //printf(" tile i = %d tile j = %d, min(range_i - i, tile_i) = %d min(range_j - j, tile_j) = %d\n", tile_i, tile_j, min(range_i - i, tile_i),  min(range_j - j, tile_j));
+            compute_input_transform(input, input_transform, tuple_size, tiles_count, tiles_width_count,
+                input_channels_block_start, 
+                input_channels_block_size, input_width, input_height, pad, tile_size, tile_step,
+                i, j, min(range_i -i , tile_i), min(range_j -j, tile_j), interchannels);
+        }
+    }
+}
+
+
+
+static void compute_output_transform(
+    float * _output, 
+    void * output_transform, 
+    int tuple_size, 
+    int tiles_count, 
+    int tiles_width_count, 
+    int tiles_block_max,
+    int output_channels, 
+    int output_width, 
+    int output_height, 
+    int output_tile_size, 
+    int output_channels_subblock_start, int tiles_subblock_start,
+    int output_channels_subblock_size, int tiles_subblock_size, 
+    int interchannels)
+{
+        interchannels = min(interchannels, output_channels_subblock_size);
+        //	fprintf(stderr, "value of interchannels in output = %d", interchannels);
+
+        const int tiles_block_start = tiles_subblock_start / tiles_block_max;
         const int tiles_block_size = min(tiles_count - tiles_block_start, tiles_block_max.value);
 
         float(*output)[output_size.height][output_size.width] =
-            (float(*)[output_size.height][output_size.width])context->output;
-        const void *output_transform = context->output_transform;
-        const float *bias = context->bias;
-        nnp_transform_2d_with_bias transform_function = context->transform_function;
+            (float(*)[output_size.height][output_size.width])_output;
+        const float *bias = NULL;
         for (int tiles_subblock_offset = 0; tiles_subblock_offset < tiles_subblock_size; tiles_subblock_offset += 1)
         {
                 const int tile = tiles_subblock_start + tiles_subblock_offset;
-                const struct fxdiv_result_int tile_xy = fxdiv_divide_int(tile, tiles_x_count);
-                const int tile_x = tile_xy.remainder;
-                const int tile_y = tile_xy.quotient;
+                int tile_x = tile % tiles_width_count;
+                int tile_y = tile / tiles_width_count;
 
                 const int output_x = tile_x * output_tile.width;
                 const int output_y = tile_y * output_tile.height;
@@ -4288,66 +4306,7 @@ static void compute_output_transform(
         }
 }
 
-static void compute_tuple_multiplication(
-    const struct tuple_multiplication_context context[restrict static 1],
-    int tiles_block_start, int output_channels_subblock_start,
-    int tiles_block_size, int output_channels_subblock_size)
-{
-
-        const int tuple_elements = context->tuple_elements;
-        const int tuple_size = context->tuple_size;
-        const int tiles_subblock_max = context->tiles_subblock_max;
-        const int input_channels_block_size = context->input_channels_block_size;
-        const int input_channels_block_start = context->input_channels_block_start;
-        const int output_channels = context->output_channels;
-        const int output_channels_subblock_max = context->output_channels_subblock_max;
-        const int output_channels_block_start = context->output_channels_block_start;
-
-        const void *input_transform = context->input_transform +
-                                      tiles_block_start * input_channels_block_size * tuple_size;
-        const void *kernel_transform = context->kernel_transform +
-                                       (output_channels_block_start + output_channels_subblock_start) * input_channels_block_size * tuple_size;
-        void *output_transform = context->output_transform +
-                                 (tiles_block_start * output_channels + (output_channels_block_start + output_channels_subblock_start) * tiles_block_size) * tuple_size;
-
-        //      printf("tuple elements = %d, output_channels_subblock_size=%d output_channels_subblock_max=%d input_channels_block_size=%d\n", tuple_elements, output_channels_subblock_size, output_channels_subblock_max, input_channels_block_size);
-        if (output_channels_subblock_size == output_channels_subblock_max)
-        {
-                const nnp_fast_tuple_gemm_function fast_gemm = context->fast_gemm;
-                while (tiles_block_size >= tiles_subblock_max)
-                {
-                        tiles_block_size -= tiles_subblock_max;
-                        // printf("fast gemm\n");
-                        nnp_s4gemm_only_3x3__neon(
-                            input_channels_block_size, input_channels_block_start,
-                            input_transform, kernel_transform, output_transform,
-                            output_channels_subblock_size * tuple_elements);
-
-                        input_transform += tiles_subblock_max * input_channels_block_size * tuple_size;
-                        output_transform += tiles_subblock_max * output_channels_subblock_size * tuple_size;
-                }
-        }
-        //		printf("intermediate %f\n", *(((float *)output_transform)+3) );
-
-        const nnp_full_tuple_gemm_function full_gemm = context->full_gemm;
-        while (tiles_block_size != 0)
-        {
-                const int tiles_subblock_size = min(tiles_block_size, tiles_subblock_max);
-                tiles_block_size -= tiles_subblock_size;
-
-                //      printf("full gemm\n");
-                nnp_s4gemm_upto_3x3__neon(
-                    tiles_subblock_size, output_channels_subblock_size,
-                    input_channels_block_size, input_channels_block_start,
-                    input_transform, kernel_transform, output_transform,
-                    output_channels_subblock_size * tuple_elements);
-
-                input_transform += tiles_subblock_max * input_channels_block_size * tuple_size;
-                output_transform += tiles_subblock_max * output_channels_subblock_size * tuple_size;
-        } // sonia - need to uncomment uncomment
-        //		printf("intermediate %f\n", *(((float *)output_transform)+3) );
-}
-
+/*
 struct NNP_CACHE_ALIGN kernel_packing_context
 {
         const float *kernel;
